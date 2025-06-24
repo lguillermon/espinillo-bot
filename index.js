@@ -13,7 +13,7 @@ app.get('/', (req, res) => {
 });
 
 // Aquí iría tu lógica de disponibilidad, por ejemplo:
-const { consultarDisponibilidad } = require('./consultarDisponibilidad');
+const { consultarDisponibilidad } = require('./utils/disponibilidad');
 
 app.post('/disponibilidad', async (req, res) => {
   const userMsg = req.body.mensaje || '';
