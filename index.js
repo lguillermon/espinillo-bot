@@ -11,7 +11,7 @@ const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => {
   res.send('Espinillo bot está funcionando 🚀');
 });
-
+ 
 // Aquí iría tu lógica de disponibilidad, por ejemplo:
 const { consultarDisponibilidad } = require('./utils/disponibilidad');
 
