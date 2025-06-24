@@ -1,45 +1,56 @@
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
-const OpenAI = require('openai');
-const twilio = require('twilio');
-const { consultarDisponibilidad } = require('./utils/disponibilidad');
+const { OpenAI } = require('openai');
+const axios = require('axios');
+const { MessagingResponse } = require('twilio').twiml;
 
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
-app.use(bodyParser.json());
 
-// Configuración correcta para OpenAI v4.x
+// Instancia de OpenAI
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-const client = twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
+// Función para consultar disponibilidad en El Espinillo
+async function consultarDisponibilidad() {
+  const body = {
+    fechaDesde: "20250715",
+    fechaHasta: "20250720",
+    nro_ota: "3",
+    personas: 2,
+    latitude: "",
+    longitude: "",
+    ip: ""
+  };
 
-app.post('/webhook', async (req, res) => {
-  const userMsg = req.body.Body;
-  const userNum = req.body.From;
+  try {
+    const resp = await axios.post(
+      'https://www.creadoresdesoft.com.ar/cha-man/v4/INFODisponibilidadPropietarios.php?slug=0JyNzIGZf6WYT2SYoNmIgoJklJ3XlJnYt0mbiAClgAClgAClgAClgoALio8woNWehV4RgwWZkBych2mcIRllgojhRnblV4Yf23buJClgACIgACIgACIgACIsCM',
+      body,
+      { headers: { 'Content-Type': 'application/json' } }
+    );
 
-  const opciones = await consultarDisponibilidad(userMsg);
+    const datos = resp.data.datos || [];
+    if (datos.length === 0) return "No se encontró disponibilidad para las fechas solicitadas.";
+    return datos.map(d => `${d.nombre}: $${d.tarifas[0].total}`).join('\n');
+  } catch (e) {
+    console.error(e);
+    return 'Hubo un error al consultar disponibilidad. Intente más tarde.';
+  }
+}
 
-  const prompt = `Cliente: "${userMsg}". Estoy en El Espinillo. Disponibilidad?:\n${opciones}\n
-Responde como asesor amable y persuasivo. Sugiere fechas, precios, beneficios, e invita a reservar.`;
+// Ruta para recibir mensajes de Twilio WhatsApp
+app.post('/whatsapp', async (req, res) => {
+  const mensajeUsuario = req.body.Body;
+  const twiml = new MessagingResponse();
 
-  const chat = await openai.chat.completions.create({
-    model: 'gpt-4',
-    messages: [{ role: 'user', content: prompt }]
-  });
-
-  const respuesta = chat.choices[0].message.content;
-
-  await client.messages.create({
-    from: `whatsapp:${process.env.TWILIO_NUMBER}`,
-    to: userNum,
-    body: respuesta
-  });
-
-  res.sendStatus(200);
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
+  // Si el usuario menciona "disponibilidad" o "fecha", consultamos la API
+  if (/disponibilidad|fecha|reservar|reserva/i.test(mensajeUsuario)) {
+    const respuestaDisponibilidad = await consultarDisponibilidad();
+    twiml.message(`🔍 Disponibilidad:\n${respuestaDisponibilidad}`);
+  } else {
+    // Caso general: responde con GPT
+    try {
+      co
