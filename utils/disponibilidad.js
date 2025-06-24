@@ -1,3 +1,4 @@
+// consultarDisponibilidad.js
 const axios = require('axios');
 
 async function consultarDisponibilidad(userMsg) {
@@ -15,13 +16,19 @@ async function consultarDisponibilidad(userMsg) {
     const resp = await axios.post(
       'https://www.creadoresdesoft.com.ar/cha-man/v4/INFODisponibilidadPropietarios.php?slug=0JyNzIGZf6WYT2SYoNmIgoJklJ3XlJnYt0mbiAClgAClgAClgAClgoALio8woNWehV4RgwWZkBych2mcIRllgojhRnblV4Yf23buJClgACIgACIgACIgACIsCM',
       body,
-      { headers: {'Content-Type':'application/json'} }
+      { headers: { 'Content-Type': 'application/json' } }
     );
+
     const datos = resp.data.datos || [];
-    return datos.map(d=>`${d.nombre}: $${d.tarifas[0].total}`).join('\n');
+
+    if (datos.length === 0) {
+      return 'No hay disponibilidad para las fechas indicadas.';
+    }
+
+    return datos.map(d => `${d.nombre}: $${d.tarifas?.[0]?.total || 'Precio no disponible'}`).join('\n');
   } catch (e) {
-    console.error(e);
-    return 'No se pudo consultar disponibilidad ahora.';
+    console.error('Error al consultar disponibilidad:', e.message);
+    return 'No se pudo consultar disponibilidad en este momento.';
   }
 }
 
