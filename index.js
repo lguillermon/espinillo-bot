@@ -1,26 +1,24 @@
 const express = require('express');
-const axios = require('axios');
-require('dotenv').config();
+const bodyParser = require('body-parser');
 
 const app = express();
-app.use(express.json());
+const port = process.env.PORT || 3000;
 
-const PORT = process.env.PORT || 3000;
+// Middleware
+app.use(bodyParser.json());
 
-// Tu endpoint de prueba
+// Ruta base para verificar si está funcionando
 app.get('/', (req, res) => {
-  res.send('Espinillo bot está funcionando 🚀');
-});
- 
-// Aquí iría tu lógica de disponibilidad, por ejemplo:
-const { consultarDisponibilidad } = require('./utils/disponibilidad');
-
-app.post('/disponibilidad', async (req, res) => {
-  const userMsg = req.body.mensaje || '';
-  const resultado = await consultarDisponibilidad(userMsg);
-  res.send(resultado);
+  res.send('🟢 El bot Espinillo está corriendo correctamente.');
 });
 
-app.listen(PORT, () => {
-  console.log(`Servidor corriendo en puerto ${PORT}`);
+// Webhook de prueba (podés luego cambiarlo al que uses para Twilio)
+app.post('/webhook', (req, res) => {
+  console.log('📩 Webhook recibido:', req.body);
+  res.status(200).send('✅ Mensaje recibido');
+});
+
+// Iniciar servidor
+app.listen(port, () => {
+  console.log(`✅ Servidor escuchando en el puerto ${port}`);
 });
