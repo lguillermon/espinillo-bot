@@ -15,6 +15,9 @@ app.post('/webhook', (req, res) => {
 
 // Puerto dinámico asignado por Railway o 8080 local
 const PORT = process.env.PORT || 8080;
+app.get('/', (req, res) => {
+  res.send('✅ Servidor vivo');
+});
 app.listen(PORT, () => {
   console.log(`🚀 Servidor escuchando en puerto ${PORT}`);
 });
