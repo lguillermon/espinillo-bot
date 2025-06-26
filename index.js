@@ -17,14 +17,13 @@ app.get("/", (req, res) => {
 app.post("/whatsapp", (req, res) => {
   console.log("📩 Mensaje recibido desde Twilio:", req.body);
 
-  res.type("text/xml"); // 👈 Esto es lo que faltaba
+  res.set("Content-Type", "text/xml"); // ✅ Encabezado necesario para Twilio
   res.send(`
     <Response>
       <Message>Hola! Soy el bot Espinillo 🐦</Message>
     </Response>
   `);
 });
-
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en el puerto ${PORT}`);
