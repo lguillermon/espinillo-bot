@@ -3,24 +3,27 @@ const bodyParser = require("body-parser");
 require("dotenv").config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
+// 👇 Railway asigna el puerto en process.env.PORT (por eso dejamos esto así)
+const PORT = process.env.PORT || 8080;
+
+// Middlewares
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-// Ruta raíz para verificar que el servidor esté vivo
+// Ruta de prueba
 app.get("/", (req, res) => {
   res.send("✅ El bot Espinillo está corriendo correctamente.");
 });
 
-// Ruta webhook para WhatsApp
+// Ruta del webhook de WhatsApp
 app.post("/whatsapp", (req, res) => {
   console.log("📩 Mensaje recibido desde Twilio:", req.body);
 
-  // Establece el header correcto
+  // Header para Twilio
   res.set("Content-Type", "text/xml");
 
-  // Envía respuesta en formato TwiML
+  // Respuesta TwiML
   res.send(`
     <Response>
       <Message>Hola! Soy el bot Espinillo 🐦</Message>
@@ -28,6 +31,7 @@ app.post("/whatsapp", (req, res) => {
   `);
 });
 
+// Inicio del servidor
 app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en el puerto ${PORT}`);
 });
