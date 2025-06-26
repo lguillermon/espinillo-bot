@@ -22,6 +22,7 @@ app.post("/whatsapp", (req, res) => {
 
   // Enviar respuesta en formato TwiML (texto plano XML)
   res.set("Content-Type", "text/xml");
+  console.log("✅ Twilio envió algo:", req.body);
   res.send(`
     <Response>
       <Message>Hola ${From}, dijiste: ${Body}</Message>
