@@ -17,7 +17,10 @@ app.get("/", (req, res) => {
 app.post("/whatsapp", (req, res) => {
   console.log("📩 Mensaje recibido desde Twilio:", req.body);
 
-  res.set("Content-Type", "text/xml"); // ✅ Encabezado necesario para Twilio
+  // Establece el header correcto
+  res.set("Content-Type", "text/xml");
+
+  // Envía respuesta en formato TwiML
   res.send(`
     <Response>
       <Message>Hola! Soy el bot Espinillo 🐦</Message>
