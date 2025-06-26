@@ -16,8 +16,15 @@ app.get("/", (req, res) => {
 // Ruta webhook para WhatsApp
 app.post("/whatsapp", (req, res) => {
   console.log("📩 Mensaje recibido desde Twilio:", req.body);
-  res.send("<Response><Message>Hola! Soy el bot Espinillo 🐦</Message></Response>");
+
+  res.type("text/xml"); // 👈 Esto es lo que faltaba
+  res.send(`
+    <Response>
+      <Message>Hola! Soy el bot Espinillo 🐦</Message>
+    </Response>
+  `);
 });
+
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en el puerto ${PORT}`);
