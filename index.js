@@ -3,9 +3,11 @@ const app = express();
 app.use(express.urlencoded({ extended: true }));
 
 app.post('/webhook', (req, res) => {
-  console.log('Mensaje recibido:', req.body);
-  res.send('OK');
+  console.log('📩 Mensaje recibido:', req.body);
+  res.send('✅ Mensaje recibido');
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor escuchando en puerto ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`🚀 Servidor escuchando en puerto ${PORT}`);
+});
