@@ -1,94 +1,87 @@
 const express = require('express');
-const axios = require('axios');
 const { MessagingResponse } = require('twilio').twiml;
-const app = express();
+const { DateTime } = require('luxon');
 
+const app = express();
 app.use(express.urlencoded({ extended: false }));
 
-// 🧠 Utilidad simple para detectar fechas (puede mejorarse luego con NLP)
-function extraerFechasDesdeTexto(mensaje) {
-  const match = mensaje.match(/(\d{1,2})\s*(al|hasta)\s*(\d{1,2})\s*de\s*(julio|agosto)/i);
+// Función mejorada para extraer fechas con cruce de mes
+function extraerRangoDeFechas(texto) {
+  const mesMap = {
+    enero: 1, feb: 2, febrero: 2, mar: 3, marzo: 3, abr: 4, abril: 4,
+    may: 5, mayo: 5, jun: 6, junio: 6, jul: 7, julio: 7,
+    ago: 8, agosto: 8, sep: 9, septiembre: 9,
+    oct: 10, octubre: 10, nov: 11, noviembre: 11,
+    dic: 12, diciembre: 12
+  };
+
+  const regex = /(?:del\s*)?(\d{1,2})(?:\s*\/\s*(\d{1,2}))?(?:\s*de)?\s*(\w+)?\s*(?:al|-)\s*(\d{1,2})(?:\s*\/\s*(\d{1,2}))?(?:\s*de)?\s*(\w+)?/i;
+  const match = texto.match(regex);
+
   if (!match) return null;
 
-  const diaDesde = match[1].padStart(2, '0');
-  const diaHasta = match[3].padStart(2, '0');
-  const mesTexto = match[4].toLowerCase();
-  const mes = mesTexto === 'julio' ? '07' : mesTexto === 'agosto' ? '08' : '01';
+  const diaInicio = parseInt(match[1]);
+  const mesInicioTexto = match[3] || match[2];
+  const diaFin = parseInt(match[4]);
+  const mesFinTexto = match[6] || match[5];
+
+  const año = DateTime.now().year;
+  let mesInicio = null;
+  let mesFin = null;
+
+  if (mesInicioTexto) {
+    mesInicio = isNaN(mesInicioTexto) ? mesMap[mesInicioTexto.toLowerCase()] : parseInt(mesInicioTexto);
+  }
+
+  if (mesFinTexto) {
+    mesFin = isNaN(mesFinTexto) ? mesMap[mesFinTexto.toLowerCase()] : parseInt(mesFinTexto);
+  }
+
+  if (!mesInicio && mesFin) {
+    mesInicio = mesFin === 1 ? 12 : mesFin - 1;
+  } else if (mesInicio && !mesFin) {
+    mesFin = mesInicio;
+  }
+
+  if (!mesInicio && !mesFin) {
+    const mesActual = DateTime.now().month;
+    mesInicio = mesFin = mesActual;
+  }
+
+  const fechaInicio = DateTime.local(año, mesInicio, diaInicio);
+  const fechaFin = DateTime.local(año, mesFin, diaFin);
+
+  if (!fechaInicio.isValid || !fechaFin.isValid) return null;
 
   return {
-    fechaDesde: `2025${mes}${diaDesde}`,
-    fechaHasta: `2025${mes}${diaHasta}`,
+    inicio: fechaInicio.toFormat('dd/MM/yyyy'),
+    fin: fechaFin.toFormat('dd/MM/yyyy')
   };
 }
 
+// Ruta webhook
 app.post('/webhook', async (req, res) => {
   const twiml = new MessagingResponse();
   const mensaje = req.body.Body || '';
   const numero = req.body.From;
 
-  console.log('📥 Mensaje recibido:', mensaje);
+  console.log('📩 Mensaje recibido:', mensaje);
 
-  const fechas = extraerFechasDesdeTexto(mensaje);
+  const fechas = extraerRangoDeFechas(mensaje);
 
-  if (!fechas) {
-    twiml.message('📅 Para ayudarte, decime las fechas así: "del 18 al 22 de julio". ¡Y te digo qué tenemos!');
-    return res.type('text/xml').send(twiml.toString());
+  if (fechas) {
+    // ⚙️ Acá luego podrías consultar disponibilidad real
+    twiml.message(`🗓️ ¡Genial! Estoy buscando disponibilidad entre el ${fechas.inicio} y el ${fechas.fin}. Te confirmo en un momento...`);
+  } else {
+    twiml.message(`📅 Para ayudarte, decime las fechas así: "del 18 al 22 de julio" o "del 25/7 al 2/8". ¡Y te digo qué tenemos!`);
   }
 
-  try {
-    // 🎯 Consulta a la API de El Espinillo
-    const respuesta = await axios.post(
-      'https://www.creadoresdesoft.com.ar/cha-man/v3/INFODisponibilidadPropietarios.php?slug=oJyNzlGZf6WYt2SYoNmlgojlkJ3XlJnYt0mbiAClgAClgAClgoAClgAClo8woNWehV4RgwWZkBych2mclRIlgojlhRnbIV4Yf23bujClgAClgAClgAClgAClgAiCsIMyAjMsVmbuFGaDJC7ISZ3FGbjClgAClgAClgAClgowe',
-      {
-        fechaDesde: fechas.fechaDesde,
-        fechaHasta: fechas.fechaHasta,
-        nro_ota: '3',
-        personas: 2,
-        latitude: '',
-        longitude: '',
-        ip: ''
-      }
-    );
-
-    const data = respuesta.data;
-
-    if (data.resultado !== 'Aceptar') {
-      twiml.message('🛑 No pude consultar la disponibilidad ahora. ¿Podés intentar más tarde?');
-      return res.type('text/xml').send(twiml.toString());
-    }
-
-    const alojamiento = data.datos[0]; // Primer bungalow disponible
-    const nombre = alojamiento.nombre;
-    const tarifa = alojamiento.tarifas[0];
-    const total = tarifa.total;
-    const promedio = tarifa.promedio;
-    const promo = alojamiento.tarifas.find(t => t.nom_tarifa.includes('PROMO'));
-    const promoTexto = promo ? `💥 Tenemos promo: ${promo.nom_tarifa} a $${promo.promedio} por noche.` : '';
-
-    const fotos = alojamiento.imagenes?.slice(0, 2).map(i => i.src);
-
-    // 🧠 Mensaje persuasivo
-    let texto = `✨ ¡Tenemos disponibilidad en ${nombre}!\n\n`;
-    texto += `🛏️ Precio regular: $${promedio}/noche\n`;
-    if (promoTexto) texto += `${promoTexto}\n`;
-    texto += `🧾 Total por tu estadía: $${total}\n\n`;
-    texto += `¿Querés que te pase el link para reservarlo ahora mismo?`;
-
-    const mensajeTwilio = twiml.message();
-    mensajeTwilio.body(texto);
-    if (fotos?.length) mensajeTwilio.media(fotos[0]);
-
-    res.type('text/xml').send(twiml.toString());
-
-  } catch (err) {
-    console.error('❌ Error al consultar la API:', err.message);
-    twiml.message('Ups! Tuvimos un error al buscar disponibilidad. ¿Probamos de nuevo en unos minutos?');
-    res.type('text/xml').send(twiml.toString());
-  }
+  res.set('Content-Type', 'text/xml');
+  res.send(twiml.toString());
 });
 
-// 🔁 Railway Port
-const PORT = process.env.PORT || 8080;
+// Iniciar server
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Bot escuchando en puerto ${PORT}`);
+  console.log(`🚀 Servidor escuchando en http://localhost:${PORT}`);
 });
