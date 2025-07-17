@@ -35,7 +35,12 @@ router.post('/webhook', async (req, res) => {
 
     console.log('🔗 Consultando disponibilidad real:', body);
 
-    const response = await axios.post('https://www.creadoresdesoft.com.ar/cha-man/v3/INFODisponibilidadPropietarios.php', body);
+   require('dotenv').config();
+
+    const response = await axios.post(
+    process.env.URL_API_DISPONIBILIDAD,
+    body
+    );
 
     const data = response.data;
 
