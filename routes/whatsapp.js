@@ -33,10 +33,7 @@ router.post('/webhook', async (req, res) => {
       ip: ''
     };
 
-    console.log('🔗 Consultando disponibilidad real:', body);
-
-   require('dotenv').config();
-
+    console.log('🔗 Consultando la disponibilidad real:', body);
     const response = await axios.post(
     process.env.URL_API_DISPONIBILIDAD,
     body
