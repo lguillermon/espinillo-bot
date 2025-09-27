@@ -1,40 +1,51 @@
-// utils/dateParser.js
 const chrono = require('chrono-node');
 const moment = require('moment');
-
-const fmt = d => moment(d).format('YYYY-MM-DD');
 
 function parseDates(texto) {
   console.log("🔍 Texto recibido para parsear:", texto);
 
-  const ref = new Date();
-  const results = chrono.es.parse(texto, ref, { forwardDate: true });
+  // --- 1) Detectar rangos explícitos tipo "del 12 al 15 de octubre" ---
+  const rangoRegex = /(\d{1,2})\s*(?:al|-)\s*(\d{1,2})\s*de\s*(\w+)/i;
+  const match = texto.match(rangoRegex);
 
-  if (results.length) {
-    const r = results[0];
-    const start = r.start ? r.start.date() : null;
-    const end = r.end ? r.end.date() : start;
+  if (match) {
+    const [ , diaInicio, diaFin, mesTexto ] = match;
 
-    console.log("📅 Resultado chrono:", start, end);
+    // Usamos chrono para resolver el mes (ej: "octubre" -> Date con mes correcto)
+    const mesParse = chrono.parseDate(mesTexto);
+    if (mesParse) {
+      const year = moment().year();
+      const mes = mesParse.getMonth() + 1; // JS devuelve 0-11
+
+      const fechaDesde = moment(`${year}-${mes}-${diaInicio}`, "YYYY-M-D");
+      const fechaHasta = moment(`${year}-${mes}-${diaFin}`, "YYYY-M-D");
+
+      if (fechaDesde.isValid() && fechaHasta.isValid()) {
+        return {
+          fechaDesde: fechaDesde.format("YYYY-MM-DD"),
+          fechaHasta: fechaHasta.format("YYYY-MM-DD")
+        };
+      }
+    }
+  }
+
+  // --- 2) Si no es rango, usamos Chrono directamente ---
+  const parsed = chrono.parse(texto);
+
+  if (parsed.length >= 1) {
+    const fechaDesde = moment(parsed[0].start.date());
+    const fechaHasta = parsed[0].end
+      ? moment(parsed[0].end.date())
+      : fechaDesde;
 
     return {
-      fechaDesde: start ? fmt(start) : null,
-      fechaHasta: end ? fmt(end) : null
+      fechaDesde: fechaDesde.format("YYYY-MM-DD"),
+      fechaHasta: fechaHasta.format("YYYY-MM-DD")
     };
   }
 
-  // fallback regex simple (ej: 12/10 al 15/10)
-  const m = texto.match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\s*(?:al|a)\s*(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/i);
-  if (m) {
-    const [ , d1, mo1, y1, d2, mo2, y2 ] = m;
-    const year1 = y1 ? (y1.length === 2 ? `20${y1}` : y1) : String(ref.getFullYear());
-    const year2 = y2 ? (y2.length === 2 ? `20${y2}` : y2) : String(ref.getFullYear());
-    const from = new Date(`${year1}-${mo1}-${d1}`);
-    const to   = new Date(`${year2}-${mo2}-${d2}`);
-    return { fechaDesde: fmt(from), fechaHasta: fmt(to) };
-  }
-
-  return { fechaDesde: null, fechaHasta: null };
+  // --- 3) Si no entendimos nada ---
+  return {};
 }
 
 module.exports = parseDates;
