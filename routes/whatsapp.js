@@ -43,7 +43,7 @@ try {
     body
   );
 
-  console.log("✅ Respuesta completa de la API:", JSON.stringify(response.data, null, 2));
+  console.log("✅ Respuesta  completa de la API:", JSON.stringify(response.data, null, 2));
 
   const data = response.data;
 
