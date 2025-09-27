@@ -2,7 +2,7 @@ const chrono = require('chrono-node');
 const moment = require('moment');
 
 function parseDates(texto) {
-  console.log("🔍 Texto recibido para parsear:", texto);
+  console.log("🔍 Texto recibido para   parsear:", texto);
 
   // --- 1) Detectar rangos explícitos tipo "del 12 al 15 de octubre" ---
   const rangoRegex = /(\d{1,2})\s*(?:al|-)\s*(\d{1,2})\s*de\s*(\w+)/i;
