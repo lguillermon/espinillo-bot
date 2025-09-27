@@ -36,12 +36,14 @@ try {
   };
 
   console.log('🔗 Consultando la disponibilidad real:', body);
+  console.log("🌍 URL usada para API:", process.env.CREADORES_API_URL);
+
   const response = await axios.post(
     process.env.CREADORES_API_URL,
     body
   );
 
-  console.log('✅ Respuesta completa de la API:', response.data);
+  console.log("✅ Respuesta completa de la API:", JSON.stringify(response.data, null, 2));
 
   const data = response.data;
 
@@ -55,7 +57,10 @@ try {
     twiml.message(`😕 Por ahora no hay disponibilidad entre el ${moment(fechaDesde).format('DD/MM/YYYY')} y el ${moment(fechaHasta).format('DD/MM/YYYY')}. ¿Querés que busquemos otras fechas?`);
   }
 } catch (error) {
-  console.error('❌ Error consultando disponibilidad:', error);
+  console.error('❌ Error consultando disponibilidad:', error.message);
+  if (error.response) {
+   console.error("📩 Respuesta de error API:", error.response.data);
+  }
   twiml.message('⚠️ Tuvimos un error al buscar disponibilidad. ¿Probamos de nuevo en unos minutos?');
 }
 
