@@ -1,39 +1,37 @@
-// utils/dateParser.js
 const chrono = require('chrono-node');
-const moment = require('moment');
 
+/**
+ * Parsea una frase en español y devuelve un rango de fechas.
+ * - Si encuentra "del 12 al 15 de octubre" → devuelve start y end.
+ * - Si encuentra una sola fecha → devuelve start = end.
+ */
 function parseDates(texto) {
-  if (!texto) return {};
-
-  console.log("🔍 Texto recibido para parsear:", texto);
-
-  // Usamos el parser en español
   const results = chrono.es.parse(texto);
 
-  if (!results || results.length === 0) {
-    console.log("⚠️ No se pudo parsear la fecha");
-    return {};
+  if (results.length > 0) {
+    const result = results[0];
+
+    if (result.start && result.end) {
+      // Caso de rango de fechas
+      const startDate = result.start.date();
+      const endDate = result.end.date();
+
+      return {
+        start: startDate,
+        end: endDate
+      };
+    } else if (result.start) {
+      // Caso de fecha única
+      const startDate = result.start.date();
+
+      return {
+        start: startDate,
+        end: startDate
+      };
+    }
   }
 
-  let fechaDesde = null;
-  let fechaHasta = null;
-
-  if (results[0].start) {
-    fechaDesde = moment(results[0].start.date()).format('YYYY-MM-DD');
-  }
-
-  if (results[0].end) {
-    fechaHasta = moment(results[0].end.date()).format('YYYY-MM-DD');
-  }
-
-  // Caso especial: si solo detecta  una fecha, usamos la misma para ambos extremos
-  if (fechaDesde && !fechaHasta) {
-    fechaHasta = fechaDesde;
-  }
-
-  console.log("📅 Resultado chrono:", fechaDesde, fechaHasta);
-
-  return { fechaDesde, fechaHasta };
+  return null;
 }
 
-module.exports = parseDates;
+module.exports = { parseDates };
