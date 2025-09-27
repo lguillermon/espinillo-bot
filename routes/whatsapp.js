@@ -23,36 +23,41 @@ router.post('/webhook', async (req, res) => {
 
   
 
-  try {
-    // Formateo final para API externa
-    const body = {
-      fechaDesde: moment(fechaDesde).format('YYYY-MM-DD'),
-      fechaHasta: moment(fechaHasta).format('YYYY-MM-DD'),
-      nro_ota: '3',
-      personas: '2',
-      latitude: '',
-      longitude: '',
-      ip: ''
-    };
+try {
+  // Formateo final para API externa
+  const body = {
+    fechaDesde: moment(fechaDesde).format('YYYY-MM-DD'),
+    fechaHasta: moment(fechaHasta).format('YYYY-MM-DD'),
+    nro_ota: '3',
+    personas: '2',
+    latitude: '',
+    longitude: '',
+    ip: ''
+  };
 
-    console.log('🔗 Consultando la disponibilidad real:', body);
-    const response = await axios.post(
-    process.env.URL_API_DISPONIBILIDAD,
+  console.log('🔗 Consultando la disponibilidad real:', body);
+  const response = await axios.post(
+    process.env.CREADORES_API_URL,
     body
-    );
+  );
 
-    const data = response.data;
+  console.log('✅ Respuesta completa de la API:', response.data);
 
-    if (Array.isArray(data) && data.length > 0) {
-      const opciones = data.map((item, i) => `👉 ${item.descripcion}: $${item.precio} (${item.stock} disponibles)`).join('\n');
-      twiml.message(`📅 ¡Genial! Tengo opciones disponibles del ${moment(fechaDesde).format('DD/MM/YYYY')} al ${moment(fechaHasta).format('DD/MM/YYYY')}:\n\n${opciones}\n\n¿Querés el link para reservar?`);
-    } else {
-      twiml.message(`😕 Por ahora no hay disponibilidad entre el ${moment(fechaDesde).format('DD/MM/YYYY')} y el ${moment(fechaHasta).format('DD/MM/YYYY')}. ¿Querés que busquemos otras fechas?`);
-    }
-  } catch (error) {
-    console.error('❌ Error consultando disponibilidad:', error);
-    twiml.message('⚠️ Tuvimos un error al buscar disponibilidad. ¿Probamos de nuevo en unos minutos?');
+  const data = response.data;
+
+  if (Array.isArray(data) && data.length > 0) {
+    const opciones = data.map((item, i) => 
+      `👉 ${item.descripcion}: $${item.precio} (${item.stock} disponibles)`
+    ).join('\n');
+
+    twiml.message(`📅 ¡Genial! Tengo opciones disponibles del ${moment(fechaDesde).format('DD/MM/YYYY')} al ${moment(fechaHasta).format('DD/MM/YYYY')}:\n\n${opciones}\n\n¿Querés el link para reservar?`);
+  } else {
+    twiml.message(`😕 Por ahora no hay disponibilidad entre el ${moment(fechaDesde).format('DD/MM/YYYY')} y el ${moment(fechaHasta).format('DD/MM/YYYY')}. ¿Querés que busquemos otras fechas?`);
   }
+} catch (error) {
+  console.error('❌ Error consultando disponibilidad:', error);
+  twiml.message('⚠️ Tuvimos un error al buscar disponibilidad. ¿Probamos de nuevo en unos minutos?');
+}
 
   res.type('text/xml').send(twiml.toString());
 });
