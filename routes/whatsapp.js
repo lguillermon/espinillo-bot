@@ -37,7 +37,7 @@ router.post("/", async (req, res) => {
     };
 
     const response = await axios.post(
-      "https://www.creadoresdesoft.com.ar/cha-man/v3/INFODisponibilidadPropietarios.php",
+      "https://www.creadoresdesoft.com.ar/cha-man/v3/INFODisponibilidadPropietarios.php?slug=0JyNzIGZf6WYt2SYoNmIgojIkJ3XlJnYt0mbiACIgACIgACIgACIgoALio8woNWehV4RgwWZkBych2mclRlIgojIhRnblV4Yf23buJCIgACIgACIgACIgAiCsICMyAjMsVmbuFGaDJCI7ISZ3FGbjJCIgACIgACIgACIgAiCsISbvNmLslWYtdGQ4IzbsxWYiJXYj6WZyF3aiAiOiwWah2WZiACIgACIgACIgACIgowe",
       payload
     );
 
