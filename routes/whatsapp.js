@@ -25,17 +25,20 @@ router.post("/", async (req, res) => {
 
     console.log("📆 Fechas detectadas:", fechaDesde, "→", fechaHasta);
 
-    // 2. Llamada a la API de disponibilidad de El Espinillo
+    // 2. Armamos el payload para la API
     const payload = {
       fechaDesde,
       fechaHasta,
       nro_ota: "3",
-      personas: 2, // por ahora fijo, lo podés ajustar con parseo de mensaje
+      personas: Number(2), // fijo en 2, pero forzado a número
       latitude: "",
       longitude: "",
       ip: ""
     };
 
+    console.log("🔗 Payload enviado a API:", payload);
+
+    // 3. Llamada a la API de disponibilidad
     const response = await axios.post(
       "https://www.creadoresdesoft.com.ar/cha-man/v3/INFODisponibilidadPropietarios.php?slug=0JyNzIGZf6WYt2SYoNmIgojIkJ3XlJnYt0mbiACIgACIgACIgACIgoALio8woNWehV4RgwWZkBych2mclRlIgojIhRnblV4Yf23buJCIgACIgACIgACIgAiCsICMyAjMsVmbuFGaDJCI7ISZ3FGbjJCIgACIgACIgACIgAiCsISbvNmLslWYtdGQ4IzbsxWYiJXYj6WZyF3aiAiOiwWah2WZiACIgACIgACIgACIgowe",
       payload
@@ -44,16 +47,16 @@ router.post("/", async (req, res) => {
     const data = response.data;
     console.log("📡 Respuesta API:", JSON.stringify(data, null, 2));
 
-    // 3. Procesar respuesta
+    // 4. Procesar respuesta
     if (!data || !data[0] || !data[0].tarifas || data[0].tarifas.length === 0) {
       twiml.message(
         `😔 Por ahora no hay disponibilidad entre el ${fechaDesde} y el ${fechaHasta}. ¿Querés que busquemos otras fechas?`
       );
     } else {
       // armamos un resumen de disponibilidad
-      const tarifas = data[0].tarifas.map(
-        t => `${t.nom_tarifa}: $${t.total}`
-      ).join("\n");
+      const tarifas = data[0].tarifas
+        .map(t => `${t.nom_tarifa}: $${t.total}`)
+        .join("\n");
 
       twiml.message(
         `🎉 Tenemos disponibilidad del ${fechaDesde} al ${fechaHasta}:\n\n${tarifas}`
@@ -61,7 +64,7 @@ router.post("/", async (req, res) => {
     }
 
   } catch (error) {
-    console.error("❌ Error en whatsapp.js:", error.message);
+    console.error("❌ Error en whatsapp.js:", error.response?.data || error.message);
     twiml.message("⚠️ Ocurrió un error al procesar tu consulta. Probá de nuevo más tarde.");
   }
 
