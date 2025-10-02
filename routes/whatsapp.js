@@ -3,243 +3,235 @@ const router = express.Router();
 const axios = require('axios');
 const twilio = require('twilio');
 
-// ==== Twilio client (envs en Railway) ====
-const client = twilio(
-  process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_AUTH_TOKEN
-);
+const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+const FROM = process.env.TWILIO_WHATSAPP_FROM; // ej: whatsapp:+14155238886
+const CREADORES_URL = process.env.CREADORES_API_URL;
 
-const FROM_NUMBER = process.env.TWILIO_WHATSAPP_FROM;       // ej: whatsapp:+14155238886
-const CREADORES_URL = process.env.CREADORES_API_URL;        // v4 de INFODisponibilidad...
+// --- Estado simple en memoria por contacto ---
+const sessions = new Map(); // key: from, value: { pending: 'ask_dates'|'ask_people'|null, data: { entrada, salida, personas } }
 
-// ==== Estado simple en memoria para conversación (por número) ====
-const sessions = new Map(); 
-// Estructura: sessions.set(From, { checkin, checkout, people, awaiting: 'people'|'dates'|'checkout'|'checkin', ts })
-
-// ==== Utilidades de fecha ====
-const MONTHS = {
-  enero:1, febrero:2, marzo:3, abril:4, mayo:5, junio:6,
-  julio:7, agosto:8, septiembre:9, setiembre:9, oct:10, octubre:10,
-  nov:11, noviembre:11, dic:12, diciembre:12
-};
-function pad(n) { return String(n).padStart(2, '0'); }
-function ymd(d) {
-  const y = d.getFullYear();
-  const m = pad(d.getMonth()+1);
-  const day = pad(d.getDate());
-  return `${y}${m}${day}`;
-}
-function addDays(d, n) {
-  const x = new Date(d.getTime());
-  x.setDate(x.getDate() + n);
-  return x;
-}
-function parseYearSafe(yearStr) {
-  if (!yearStr) return null;
-  const y = parseInt(yearStr, 10);
-  if (y < 100) return 2000 + y;
-  return y;
+function getSession(from) {
+  if (!sessions.has(from)) sessions.set(from, { pending: null, data: {} });
+  return sessions.get(from);
 }
 
-// Si solo viene DD/MM => usamos año actual
-function makeDateDDMMYYYY(dd, mm, yyyy) {
-  const today = new Date();
-  const year = yyyy ? parseYearSafe(yyyy) : today.getFullYear();
-  const d = new Date(year, parseInt(mm,10)-1, parseInt(dd,10));
-  return isNaN(d.getTime()) ? null : d;
-}
+// ---- Utilidades de fechas ----
+const MONTHS = [
+  'enero','febrero','marzo','abril','mayo','junio',
+  'julio','agosto','septiembre','octubre','noviembre','diciembre'
+];
 
-// Si viene “mes” por nombre
-function makeDateDDMesYYYY(dd, mesStr, yyyy) {
-  const today = new Date();
-  const month = MONTHS[mesStr.toLowerCase()];
-  if (!month) return null;
-  const year = yyyy ? parseYearSafe(yyyy) : today.getFullYear();
-  const d = new Date(year, month-1, parseInt(dd,10));
-  return isNaN(d.getTime()) ? null : d;
-}
+function zero(n){ return n < 10 ? '0'+n : ''+n; }
+function yyyymmdd(d){ return d.getFullYear() + zero(d.getMonth()+1) + zero(d.getDate()); }
+function ddmmyyyy(d){ return zero(d.getDate()) + '/' + zero(d.getMonth()+1) + '/' + d.getFullYear(); }
 
-// Rango tipo “del 7 al 10 de octubre” o “20-22 de noviembre”
-function coerceRangeWithMonth(d1, d2, mesStr) {
-  const today = new Date();
-  const month = MONTHS[mesStr.toLowerCase()];
-  if (!month) return null;
-  const year = today.getFullYear();
-  const start = new Date(year, month-1, parseInt(d1,10));
-  const end   = new Date(year, month-1, parseInt(d2,10));
-  if (isNaN(start.getTime()) || isNaN(end.getTime())) return null;
-  // si el rango “pasó”, podríamos subir el año para mantener futuro (opcional)
-  return { start, end };
-}
+/**
+ * Intenta parsear fechas en textos tipo:
+ * - "del 7 al 10 de octubre"
+ * - "15/10 al 18/10"
+ * - "finde 20-22 de noviembre"
+ * - "7 al 10/10"
+ * Devuelve {entrada: Date, salida: Date} o null.
+ * Asume año actual, y si pasó esa fecha, usa año siguiente.
+ */
+function parseDates(text) {
+  const now = new Date();
+  const thisYear = now.getFullYear();
 
-// ==== Parser de personas ====
-function extractPeople(text) {
-  const t = text.toLowerCase();
+  const norm = text.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
 
-  // “…, 3 pax”, “4 personas”, “2 pasajeros”, “3 adultos/mayores”
-  let m = t.match(/(?:^|[, ]+)(?:para\s+|somos\s+)?(\d{1,2})\s*(?:pax|personas?|pasajeros?|adultos?|mayores)\b/);
-  if (m) return parseInt(m[1], 10);
+  // 1) "del 7 al 10 de octubre" / "15 al 18 de nov"
+  const reWord = /\b(?:del\s*)?(\d{1,2})\s*(?:al|-|a)\s*(\d{1,2})\s*(?:de\s*)?([a-zñ\.]+)/i;
+  // 2) "15/10 al 18/10" / "15/10 a 18/10"
+  const reSlash = /(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\s*(?:al|-|a)\s*(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/i;
+  // 3) "fin de 20-22 de noviembre" / "20-22 noviembre"
+  const reFinde = /\b(?:fin(?:de)?|finde|fin de)\s*(\d{1,2})\s*[-–]\s*(\d{1,2})\s*(?:de\s*)?([a-zñ\.]+)/i;
 
-  // “para 4”
-  m = t.match(/\bpara\s+(\d{1,2})\b/);
-  if (m) return parseInt(m[1], 10);
+  const monthIdx = (mstr) => {
+    const s = mstr.replace(/\./g, '');
+    const i = MONTHS.findIndex(m => s.startsWith(m.slice(0, Math.max(3, Math.min(4, m.length)))));
+    return i; // -1 si no la encuentra
+  };
 
-  // “somos 3”
-  m = t.match(/\bsomos\s+(\d{1,2})\b/);
-  if (m) return parseInt(m[1], 10);
+  // palabra + mes
+  let m = norm.match(reWord);
+  if (m) {
+    const d1 = parseInt(m[1], 10);
+    const d2 = parseInt(m[2], 10);
+    const mi = monthIdx(m[3]);
+    if (mi >= 0) {
+      let y = thisYear;
+      const entrada = new Date(y, mi, d1);
+      const salida = new Date(y, mi, d2);
+      // si ya pasó salida completa este año, probar año siguiente
+      if (salida < now) {
+        y = thisYear + 1;
+        entrada.setFullYear(y);
+        salida.setFullYear(y);
+      }
+      if (entrada < salida) return { entrada, salida };
+    }
+  }
+
+  // con barra
+  m = norm.match(reSlash);
+  if (m) {
+    let d1 = parseInt(m[1],10), mo1 = parseInt(m[2],10)-1, y1 = m[3]? parseInt(m[3],10) : thisYear;
+    let d2 = parseInt(m[4],10), mo2 = parseInt(m[5],10)-1, y2 = m[6]? parseInt(m[6],10) : y1;
+    if (y1 < 100) y1 += 2000;
+    if (y2 < 100) y2 += 2000;
+    const entrada = new Date(y1, mo1, d1);
+    const salida  = new Date(y2, mo2, d2);
+    if (salida < now) { entrada.setFullYear(entrada.getFullYear()+1); salida.setFullYear(salida.getFullYear()+1); }
+    if (entrada < salida) return { entrada, salida };
+  }
+
+  // finde 20-22 noviembre
+  m = norm.match(reFinde);
+  if (m) {
+    const d1 = parseInt(m[1],10);
+    const d2 = parseInt(m[2],10);
+    const mi = monthIdx(m[3]);
+    if (mi >= 0) {
+      let y = thisYear;
+      const entrada = new Date(y, mi, d1);
+      const salida = new Date(y, mi, d2);
+      if (salida < now) { y = thisYear + 1; entrada.setFullYear(y); salida.setFullYear(y); }
+      if (entrada < salida) return { entrada, salida };
+    }
+  }
 
   return null;
 }
 
-// ==== Parser de fechas ====
-function extractDates(text) {
-  const t = text.toLowerCase().replace(/,/g, ' ');
-  const today = new Date();
-
-  // 1) dd/mm[/yyyy] al dd/mm[/yyyy]
-  let m = t.match(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\s*(?:al|a)\s*(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/);
-  if (m) {
-    const inD = makeDateDDMMYYYY(m[1], m[2], m[3]);
-    const outD = makeDateDDMMYYYY(m[4], m[5], m[6]);
-    if (inD && outD) return { checkin: inD, checkout: outD };
+/**
+ * Personas:
+ * - "3 pax", "3 personas", "somos 4", "para 2", "2 pasajeros", "2 adultos", "2 mayores"
+ */
+function parsePeople(text) {
+  const norm = text.toLowerCase();
+  const reList = [
+    /\b(\d{1,2})\s*(?:pax|personas?|pasajeros?|adultos?|mayores?)\b/i,
+    /\bsomos\s+(\d{1,2})\b/i,
+    /\bpara\s+(\d{1,2})\b/i
+  ];
+  for (const re of reList) {
+    const m = norm.match(re);
+    if (m) return parseInt(m[1], 10);
   }
-
-  // 2) del dd al dd de mes
-  m = t.match(/\bdel\s+(\d{1,2})\s+al\s+(\d{1,2})\s+de\s+([a-zá]+)\b/);
-  if (m) {
-    const r = coerceRangeWithMonth(m[1], m[2], m[3]);
-    if (r) return { checkin: r.start, checkout: r.end };
-  }
-
-  // 3) dd - dd de mes (ej: 20-22 de noviembre)
-  m = t.match(/\b(\d{1,2})\s*[-–]\s*(\d{1,2})\s+de\s+([a-zá]+)\b/);
-  if (m) {
-    const r = coerceRangeWithMonth(m[1], m[2], m[3]);
-    if (r) return { checkin: r.start, checkout: r.end };
-  }
-
-  // 4) del dd al dd (mes actual)
-  m = t.match(/\bdel\s+(\d{1,2})\s+al\s+(\d{1,2})\b/);
-  if (m) {
-    const year = today.getFullYear();
-    const month = today.getMonth();
-    const start = new Date(year, month, parseInt(m[1],10));
-    const end   = new Date(year, month, parseInt(m[2],10));
-    if (!isNaN(start.getTime()) && !isNaN(end.getTime())) return { checkin: start, checkout: end };
-  }
-
-  // 5) dd de mes al dd de mes (más explícito)
-  m = t.match(/\b(\d{1,2})\s+de\s+([a-zá]+)\s+(?:al|a)\s+(\d{1,2})\s+de\s+([a-zá]+)\b/);
-  if (m) {
-    const inD  = makeDateDDMesYYYY(m[1], m[2]);
-    const outD = makeDateDDMesYYYY(m[3], m[4]);
-    if (inD && outD) return { checkin: inD, checkout: outD };
-  }
-
-  // 6) fallback: cualquier dd/mm y dd/mm sueltos en texto (primero check-in, segundo check-out)
-  const all = [...t.matchAll(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/g)];
-  if (all.length >= 2) {
-    const inD  = makeDateDDMMYYYY(all[0][1], all[0][2], all[0][3]);
-    const outD = makeDateDDMMYYYY(all[1][1], all[1][2], all[1][3]);
-    if (inD && outD) return { checkin: inD, checkout: outD };
-  }
-
-  return { checkin: null, checkout: null };
+  return null;
 }
 
-// ==== Mensajes auxiliares ====
-async function say(to, body) {
-  await client.messages.create({
-    from: FROM_NUMBER,
-    to,
-    body
-  });
+function nightsBetween(a,b){ return Math.round((b - a) / (1000*60*60*24)); }
+
+// --- Mensajería ---
+async function say(to, body){
+  await client.messages.create({ from: FROM, to: to, body });
 }
 
-// ==== Flujo principal ====
+// --- Flujo principal ---
 router.post('/webhook', async (req, res) => {
   const from = req.body.From;
-  const body = (req.body.Body || '').trim();
+  const msg  = (req.body.Body || '').trim();
 
-  // 1) Ack rápido
-  await say(from, '👌 Recibí tu mensaje. Estoy revisando disponibilidad...');
+  console.log('📩 Mensaje recibido:', msg, 'de', from);
 
-  // 2) Intentar extraer datos
-  const { checkin, checkout } = extractDates(body);
-  let people = extractPeople(body);
+  const session = getSession(from);
 
-  console.log('🧩 Parser> dates:', checkin && checkin.toISOString(), checkout && checkout.toISOString(), ' people:', people);
+  // Palabras de “continuación” que no aportan datos (evitan ruido)
+  const fillers = /^(ok|dale|perfecto|listo|si|sí|gracias)\.?$/i;
 
-  // 3) Leer/crear sesión
-  const s = sessions.get(from) || { checkin: null, checkout: null, people: null, awaiting: null, ts: Date.now() };
-  if (checkin)  s.checkin  = checkin;
-  if (checkout) s.checkout = checkout;
-  if (people)   s.people   = people;
-
-  // 4) Si falta algo, preguntamos de forma dirigida
-  if (!s.checkin && !s.checkout) {
-    s.awaiting = 'dates';
-    sessions.set(from, s);
-    await say(from, '📅 ¿Podés indicarme **fecha de entrada y salida**? (ej: "del 7 al 10 de octubre" o "15/10 al 18/10")');
-    return res.sendStatus(200);
-  }
-  if (s.checkin && !s.checkout) {
-    s.awaiting = 'checkout';
-    sessions.set(from, s);
-    await say(from, '📆 Gracias. ¿Y la **fecha de salida**?');
-    return res.sendStatus(200);
-  }
-  if (!s.people) {
-    s.awaiting = 'people';
-    sessions.set(from, s);
-    await say(from, '👥 ¿Para **cuántas personas** es la reserva? (ej: "3 pax" o "somos 2")');
-    return res.sendStatus(200);
+  // 1) Si hay una pregunta pendiente, intentamos completar solo eso
+  if (session.pending === 'ask_people') {
+    const p = parsePeople(msg);
+    if (p) {
+      session.data.personas = p;
+      session.pending = null;
+    } else if (!fillers.test(msg)) {
+      await say(from, '👥 ¿Para *cuántas personas* es la reserva? (ej: "3 pax" o "somos 2")');
+      res.sendStatus(200);
+      return;
+    }
+  } else if (session.pending === 'ask_dates') {
+    const d = parseDates(msg);
+    if (d) {
+      session.data.entrada = d.entrada;
+      session.data.salida  = d.salida;
+      session.pending = null;
+    } else if (!fillers.test(msg)) {
+      await say(from, '📆 ¿Podés indicarme *fecha de entrada y salida*? (ej: "del 7 al 10 de octubre" o "15/10 al 18/10")');
+      res.sendStatus(200);
+      return;
+    }
   }
 
-  // 5) Ya tenemos todo -> echo de lo entendido
-  const humanIn  = `${pad(s.checkin.getDate())}/${pad(s.checkin.getMonth()+1)}/${s.checkin.getFullYear()}`;
-  const humanOut = `${pad(s.checkout.getDate())}/${pad(s.checkout.getMonth()+1)}/${s.checkout.getFullYear()}`;
+  // 2) Intentamos parsear lo nuevo del mensaje (completa o pisa lo anterior)
+  const parsedDates = parseDates(msg);
+  const parsedPeople = parsePeople(msg);
 
-  await say(from, [
-    '🔎 Entendí lo siguiente:',
-    `👉 Desde: ${ymd(s.checkin)} (${humanIn})`,
-    `👉 Hasta: ${ymd(s.checkout)} (${humanOut})`,
-    `👉 Personas: ${s.people}`
-  ].join('\n'));
+  if (parsedDates) { session.data.entrada = parsedDates.entrada; session.data.salida = parsedDates.salida; }
+  if (parsedPeople) { session.data.personas = parsedPeople; }
 
-  // 6) Preparar payload para la API (⚠️ Restar 1 día al checkout)
-  const apiDesde = ymd(s.checkin);
-  const apiHasta = ymd(addDays(s.checkout, -1)); // <-- checkout - 1 día
+  const { entrada, salida, personas } = session.data;
+
+  // 3) Validar faltantes (y preguntar por lo que falte)
+  if (!entrada || !salida) {
+    session.pending = 'ask_dates';
+    if (!fillers.test(msg)) {
+      await say(from, '📆 ¿Podés indicarme *fecha de entrada y salida*? (ej: "del 7 al 10 de octubre" o "15/10 al 18/10")');
+    }
+    res.sendStatus(200);
+    return;
+  }
+  if (!personas) {
+    session.pending = 'ask_people';
+    if (!fillers.test(msg)) {
+      await say(from, '👥 ¿Para *cuántas personas* es la reserva? (ej: "3 pax" o "somos 2")');
+    }
+    res.sendStatus(200);
+    return;
+  }
+
+  // 4) Ya tenemos todo → confirmo lo entendido y consulto la API
+  const noches = nightsBetween(entrada, salida);
+  const hastaAPI = (() => {
+    const d = new Date(salida); // checkout
+    d.setDate(d.getDate() - 1); // API: hasta = salida - 1 día
+    return yyyymmdd(d);
+  })();
+
+  const payload = {
+    fechaDesde: yyyymmdd(entrada),
+    fechaHasta: hastaAPI,
+    nro_ota: "3",
+    personas: personas,
+    latitude: "",
+    longitude: "",
+    ip: ""
+  };
+
+  await say(from,
+    `🔎 Entendí lo siguiente:\n` +
+    `👉 Desde: ${yyyymmdd(entrada)} (${ddmmyyyy(entrada)})\n` +
+    `👉 Hasta: ${hastaAPI} (${ddmmyyyy(new Date(salida.getFullYear(), salida.getMonth(), salida.getDate()-1))})\n` +
+    `👉 Personas: ${personas}\n\n` +
+    `👌 Estoy verificando disponibilidad en El Espinillo...`
+  );
 
   try {
-    // Consultar API Creadores
-    const resp = await axios.post(
-      CREADORES_URL,
-      {
-        fechaDesde: apiDesde,
-        fechaHasta: apiHasta,
-        nro_ota: "3",
-        personas: s.people,
-        latitude: "",
-        longitude: "",
-        ip: ""
-      },
-      { headers: { 'Content-Type': 'application/json' } }
-    );
-
+    const resp = await axios.post(CREADORES_URL, payload, { headers: { 'Content-Type': 'application/json' } });
     const data = resp.data;
-    console.log('📦 Respuesta API:', JSON.stringify(data).slice(0, 500));
 
-    if (data.resultado === 'Aceptar' && Array.isArray(data.datos) && data.datos.length) {
-      let msg = '📊 Disponibilidad encontrada:\n\n';
+    if (data?.resultado === 'Aceptar' && Array.isArray(data.datos) && data.datos.length) {
+      let mensaje = '📊 *Disponibilidad encontrada:*\n\n';
       for (const hab of data.datos) {
-        msg += `🔹 ${hab.nombre} - Stock: ${hab.stock}\n`;
+        mensaje += `🔹 ${hab.nombre} – Stock: ${hab.stock}\n`;
         if (hab.tarifas?.length) {
           const t = hab.tarifas[0];
-          msg += `💲 Tarifa: ${t.total} (${t.cantidad_dias} noches)\n\n`;
+          mensaje += `💲 Tarifa: ${Number(t.total).toLocaleString('es-AR')} (${noches} noches)\n\n`;
         }
       }
-      await say(from, msg.trim());
+      await say(from, mensaje.trim());
     } else {
       await say(from, '😔 No encontré disponibilidad para esas fechas.');
     }
@@ -248,8 +240,6 @@ router.post('/webhook', async (req, res) => {
     await say(from, '⚠️ Hubo un error al consultar disponibilidad, por favor intentá de nuevo.');
   }
 
-  // 7) Opcional: cerrar sesión (o mantenerla unos minutos)
-  sessions.delete(from);
   res.sendStatus(200);
 });
 
