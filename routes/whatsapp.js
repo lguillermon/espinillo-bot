@@ -3,55 +3,37 @@ const router = express.Router();
 const axios = require('axios');
 const twilio = require('twilio');
 
-// Inicializar cliente Twilio
+// 🔹 Logs de seguridad para confirmar que las variables están llegando
+console.log("👉 TWILIO_ACCOUNT_SID presente?", !!process.env.TWILIO_ACCOUNT_SID);
+console.log("👉 TWILIO_AUTH_TOKEN presente?", !!process.env.TWILIO_AUTH_TOKEN);
+console.log("👉 TWILIO_WHATSAPP_FROM presente?", !!process.env.TWILIO_WHATSAPP_FROM);
+
 const client = twilio(
   process.env.TWILIO_ACCOUNT_SID,
   process.env.TWILIO_AUTH_TOKEN
 );
 
-// Función auxiliar: restar 1 día a la fecha de salida
-function ajustarFechaHasta(fechaHasta) {
-  const fecha = new Date(
-    fechaHasta.slice(0, 4),      // Año
-    parseInt(fechaHasta.slice(4, 6)) - 1, // Mes (0-based)
-    fechaHasta.slice(6, 8)       // Día
-  );
-  fecha.setDate(fecha.getDate() - 1);
-
-  const yyyy = fecha.getFullYear();
-  const mm = String(fecha.getMonth() + 1).padStart(2, '0');
-  const dd = String(fecha.getDate()).padStart(2, '0');
-
-  return `${yyyy}${mm}${dd}`;
-}
-
-// 📌 Webhook de WhatsApp
+// Webhook de WhatsApp
 router.post('/webhook', async (req, res) => {
   const incomingMsg = req.body.Body;
   const from = req.body.From;
 
-  console.log("📩 Mensaje recibido:", incomingMsg);
+  console.log("📩 Mensaje recibido:", incomingMsg, "de", from);
 
-  // Mensaje inicial al usuario
+  // 1. Mensaje inicial de "espera"
   await client.messages.create({
-    from: process.env.TWILIO_WHATSAPP_FROM,
+    from: process.env.TWILIO_WHATSAPP_FROM, // ahora configurable por variable
     to: from,
     body: "👌 Estoy verificando disponibilidad en El Espinillo... dame unos segundos."
   });
 
   try {
-    // 🔹 Para ahora usamos fechas fijas de prueba (después reemplazamos con parser de fechas del mensaje)
-    const fechaDesde = "20251007";
-    const fechaSalida = "20251010"; // Usuario pide hasta el 10
-    const fechaHasta = ajustarFechaHasta(fechaSalida); // API espera hasta 9
-    console.log("➡️ Consulta API:", { fechaDesde, fechaHasta });
-
-    // Consulta al endpoint de disponibilidad
+    // 2. Consulta al endpoint Creadores del Soft
     const response = await axios.post(
-      process.env.CREADORES_API_URL,
+      process.env.CREADORES_API_URL,  // configurable en variables
       {
-        fechaDesde,
-        fechaHasta,
+        fechaDesde: "20251007",
+        fechaHasta: "20251009", // ⚠️ recordar: fechaHasta = fechaSalida - 1 día
         nro_ota: "3",
         personas: 2,
         latitude: "",
@@ -62,19 +44,20 @@ router.post('/webhook', async (req, res) => {
     );
 
     const data = response.data;
-    console.log("✅ Respuesta API:", JSON.stringify(data, null, 2));
+    console.log("📊 Respuesta API:", JSON.stringify(data, null, 2));
 
     if (data.resultado === "Aceptar" && data.datos.length > 0) {
-      let mensaje = "🏡 Disponibilidad encontrada en El Espinillo:\n\n";
+      let mensaje = "🏡 Disponibilidad encontrada:\n\n";
 
       data.datos.forEach(hab => {
         mensaje += `🔹 ${hab.nombre} - Stock: ${hab.stock}\n`;
         if (hab.tarifas && hab.tarifas.length > 0) {
-          const tarifa = hab.tarifas[0];
+          const tarifa = hab.tarifas[0]; // ejemplo: tomo la primera
           mensaje += `💲 Tarifa: ${tarifa.total} (${tarifa.cantidad_dias} noches)\n\n`;
         }
       });
 
+      // 3. Enviar disponibilidad al cliente
       await client.messages.create({
         from: process.env.TWILIO_WHATSAPP_FROM,
         to: from,
@@ -84,12 +67,12 @@ router.post('/webhook', async (req, res) => {
       await client.messages.create({
         from: process.env.TWILIO_WHATSAPP_FROM,
         to: from,
-        body: "😔 No encontré disponibilidad para esas fechas en El Espinillo."
+        body: "😔 No encontré disponibilidad para esas fechas."
       });
     }
-
   } catch (err) {
-    console.error("❌ Error en webhook:", err.message);
+    console.error("❌ Error consultando API o Twilio:", err.message);
+
     await client.messages.create({
       from: process.env.TWILIO_WHATSAPP_FROM,
       to: from,
@@ -97,7 +80,7 @@ router.post('/webhook', async (req, res) => {
     });
   }
 
-  // Twilio espera siempre un 200 OK
+  // Twilio siempre espera un 200 OK
   res.sendStatus(200);
 });
 
