@@ -76,7 +76,7 @@ router.post('/webhook', async (req, res) => {
     await client.messages.create({
       from: process.env.TWILIO_WHATSAPP_FROM,
       to: from,
-      body: "⚠️ Hubo un error al consultar disponibilidad, por favor intentá de nuevo."
+      body: "⚠️ Hubo un error  al consultar disponibilidad, por favor intentá de nuevo."
     });
   }
 
