@@ -17,7 +17,7 @@ router.post('/webhook', async (req, res) => {
   await client.messages.create({
     from: 'whatsapp:+14155238886', // Tu Twilio Sandbox
     to: from,
-    body: "👌 Estoy verificando disponibilidad en El Espinillo... dame unos segundos."
+    body: "👌 Estoy  verificando disponibilidad en El Espinillo... dame unos segundos."
   });
 
   try {
