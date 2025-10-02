@@ -3,6 +3,7 @@ const router = express.Router();
 const axios = require("axios");
 const { MessagingResponse } = require("twilio").twiml;
 const { parseDates } = require("../utils/dateParser");
+const moment = require("moment");
 
 // Endpoint de recepción de mensajes WhatsApp
 router.post("/", async (req, res) => {
@@ -13,7 +14,7 @@ router.post("/", async (req, res) => {
     console.log("📩 Mensaje recibido:", mensaje);
 
     // 1. Intentamos parsear las fechas
-    const { fechaDesde, fechaHasta } = parseDates(mensaje);
+    let { fechaDesde, fechaHasta } = parseDates(mensaje);
 
     if (!fechaDesde || !fechaHasta) {
       twiml.message(
@@ -23,62 +24,62 @@ router.post("/", async (req, res) => {
       return;
     }
 
-    console.log("📆 Fechas detectadas:", fechaDesde, "→", fechaHasta);
+    // ✅ Ajuste: fechaHasta debe ser día de salida (checkout),
+    // entonces restamos 1 día al pedido del usuario
+    const fechaHastaAjustada = moment(fechaHasta, "YYYY-MM-DD")
+      .subtract(1, "days")
+      .format("YYYYMMDD");
 
-    // Payload común
-    const payload = {
+    const fechaDesdeAPI = moment(fechaDesde, "YYYY-MM-DD").format("YYYYMMDD");
+
+    console.log(
+      "📆 Fechas detectadas (usuario):",
       fechaDesde,
-      fechaHasta,
-      nro_ota: "3", // OTA Espinillo
-      personas: 2,
+      "→",
+      fechaHasta
+    );
+    console.log(
+      "📆 Fechas ajustadas (API):",
+      fechaDesdeAPI,
+      "→",
+      fechaHastaAjustada
+    );
+
+    // 2. Payload para la API (versión v4)
+    const payload = {
+      fechaDesde: fechaDesdeAPI,
+      fechaHasta: fechaHastaAjustada,
+      nro_ota: "3",
+      personas: 2, // Por ahora fijo
       latitude: "",
       longitude: "",
       ip: ""
     };
 
-    // 2. Llamada API Espinillo (con slug)
-    let response = await axios.post(
-      "https://www.creadoresdesoft.com.ar/cha-man/v3/INFODisponibilidadPropietarios.php?slug=0JyNzIGZf6WYt2SYoNmIgojIkJ3XlJnYt0mbiACIgACIgACIgACIgoALio8woNWehV4RgwWZkBych2mclRlIgojIhRnblV4Yf23buJCIgACIgACIgACIgAiCsICMyAjMsVmbuFGaDJCI7ISZ3FGbjJCIgACIgACIgACIgAiCsISbvNmLslWYtdGQ4IzbsxWYiJXYj6WZyF3aiAiOiwWah2WZiACIgACIgACIgACIgowe",
-      payload
-    );
+    const urlAPI =
+      "https://www.creadoresdesoft.com.ar/cha-man/v4/INFODisponibilidadPropietarios.php?slug=0JyNzIGZf6WYt2SYoNmIgojIkJ3XlJnYt0mbiACIgACIgACIgACIgoALio8woNWehV4RgwWZkBych2mclRlIgojIhRnblV4Yf23buJCIgACIgACIgACIgAiCsICMyAjMsVmbuFGaDJCI7ISZ3FGbjJCIgACIgACIgACIgAiCsISbvNmLslWYtdGQ4IzbsxWYiJXYj6WZyF3aiAiOiwWah2WZiACIgACIgACIgACIgowe";
 
-    let data = response.data;
+    const response = await axios.post(urlAPI, payload);
+    const data = response.data;
+
     console.log("📡 Respuesta API Espinillo:", JSON.stringify(data, null, 2));
 
-    // 3. Si no hay disponibilidad en Espinillo, probamos en General
-    if (!data || !data[0] || !data[0].tarifas || data[0].tarifas.length === 0) {
-      console.log("⚠️ Sin disponibilidad en Espinillo → probamos en General");
-
-      payload.nro_ota = "1"; // OTA General
-      response = await axios.post(
-        "https://www.creadoresdesoft.com.ar/cha-man/v3/INFODisponibilidadPropietarios.php",
-        payload
+    // 3. Procesar respuesta
+    if (!data || data.resultado !== "Aceptar" || !data.datos.length) {
+      twiml.message(
+        `😔 Por ahora no hay disponibilidad entre el ${fechaDesde} y el ${fechaHasta}. ¿Querés que busquemos otras fechas?`
       );
-
-      data = response.data;
-      console.log("📡 Respuesta API General:", JSON.stringify(data, null, 2));
-
-      if (!data || !data[0] || !data[0].tarifas || data[0].tarifas.length === 0) {
-        twiml.message(
-          `😔 Por ahora no hay disponibilidad entre el ${fechaDesde} y el ${fechaHasta}. ¿Querés que busquemos otras fechas?`
-        );
-      } else {
-        const tarifas = data[0].tarifas
-          .map(t => `${t.nom_tarifa}: $${t.total}`)
-          .join("\n");
-
-        twiml.message(
-          `ℹ️ No encontramos disponibilidad en El Espinillo, pero sí en Termas del Guaychú general:\n\n${tarifas}`
-        );
-      }
     } else {
-      // Hay disponibilidad en Espinillo
-      const tarifas = data[0].tarifas
-        .map(t => `${t.nom_tarifa}: $${t.total}`)
-        .join("\n");
+      // armamos un resumen de disponibilidad
+      const tarifas = data.datos
+        .map(
+          (t) =>
+            `🏠 ${t.nombre} (${t.mayores} adultos): Stock ${t.stock}`
+        )
+        .join("\n\n");
 
       twiml.message(
-        `🎉 Tenemos disponibilidad en El Espinillo del ${fechaDesde} al ${fechaHasta}:\n\n${tarifas}`
+        `🎉 Tenemos disponibilidad del ${fechaDesde} al ${fechaHasta}:\n\n${tarifas}`
       );
     }
   } catch (error) {
