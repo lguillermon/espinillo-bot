@@ -1,10 +1,21 @@
-app.post('/webhook', async (req, res) => {
+const express = require('express');
+const router = express.Router();
+const axios = require('axios');
+const twilio = require('twilio');
+
+const client = twilio(
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN
+);
+
+// Webhook de WhatsApp
+router.post('/webhook', async (req, res) => {
   const incomingMsg = req.body.Body;
   const from = req.body.From;
 
   // 1. Mensaje inicial de "espera"
   await client.messages.create({
-    from: 'whatsapp:+14155238886', // tu Twilio Sandbox number
+    from: 'whatsapp:+14155238886', // Tu Twilio Sandbox
     to: from,
     body: "👌 Estoy verificando disponibilidad en El Espinillo... dame unos segundos."
   });
@@ -15,7 +26,7 @@ app.post('/webhook', async (req, res) => {
       'https://www.creadoresdesoft.com.ar/cha-man/v4/INFODisponibilidadPropietarios.php?slug=...',
       {
         fechaDesde: "20251007",
-        fechaHasta: "20251009",
+        fechaHasta: "20251009", // 🔹 recordar: fechaHasta = fechaSalida - 1 día
         nro_ota: "3",
         personas: 2,
         latitude: "",
@@ -31,7 +42,7 @@ app.post('/webhook', async (req, res) => {
       let mensaje = "🏡 Disponibilidad encontrada:\n\n";
 
       data.datos.forEach(hab => {
-        mensaje += `🔹 ${hab.nombre} - Stock: ${hab.stock_disponible}\n`;
+        mensaje += `🔹 ${hab.nombre} - Stock: ${hab.stock}\n`;
         if (hab.tarifas && hab.tarifas.length > 0) {
           const tarifa = hab.tarifas[0]; // ejemplo: tomo la primera
           mensaje += `💲 Tarifa: ${tarifa.total} (${tarifa.cantidad_dias} noches)\n\n`;
@@ -60,5 +71,8 @@ app.post('/webhook', async (req, res) => {
     });
   }
 
+  // Twilio siempre espera un 200 OK
   res.sendStatus(200);
 });
+
+module.exports = router;

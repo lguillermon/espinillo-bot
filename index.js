@@ -1,17 +1,14 @@
-require('dotenv').config();
 const express = require('express');
+const bodyParser = require('body-parser');
+const whatsappRoutes = require('./routes/whatsapp');
+
 const app = express();
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use(bodyParser.json());
 
-// Middleware necesario
-app.use(express.urlencoded({ extended: false }));
-app.use(express.json());
+app.use('/', whatsappRoutes);
 
-// Rutas
-const whatsappRouter = require('./routes/whatsapp');
-app.use('/', whatsappRouter);
-
-// Iniciar servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor escuchando en http://localhost:${PORT}`);
+  console.log(`✅ Servidor corriendo en puerto ${PORT}`);
 });
