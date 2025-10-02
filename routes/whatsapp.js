@@ -1,106 +1,53 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const axios = require('axios');
-const twilio = require('twilio');
+const axios = require("axios");
+const twilio = require("twilio");
 
-// Inicializar Twilio con variables de entorno
 const client = twilio(
   process.env.TWILIO_ACCOUNT_SID,
   process.env.TWILIO_AUTH_TOKEN
 );
 
-const TWILIO_FROM = process.env.TWILIO_WHATSAPP_FROM || 'whatsapp:+14155238886';
+const { parseFechasDesdeTexto, parseCantidadPersonas } = require("../utils/dateParser");
 
-// ------------------
-// 📅 Parser de Fechas
-// ------------------
-const monthMap = {
-  "enero": "01",
-  "febrero": "02",
-  "marzo": "03",
-  "abril": "04",
-  "mayo": "05",
-  "junio": "06",
-  "julio": "07",
-  "agosto": "08",
-  "septiembre": "09",
-  "octubre": "10",
-  "noviembre": "11",
-  "diciembre": "12"
-};
-
-function parseFechasDesdeTexto(texto) {
-  texto = texto.toLowerCase();
-
-  const hoy = new Date();
-  const year = hoy.getFullYear();
-
-  // Buscar días tipo "7 al 10"
-  const regex = /(\d{1,2})\s*(?:al|-|hasta)\s*(\d{1,2})/;
-  const match = texto.match(regex);
-
-  // Buscar mes
-  let mesDetectado = null;
-  for (const mes in monthMap) {
-    if (texto.includes(mes)) {
-      mesDetectado = monthMap[mes];
-      break;
-    }
-  }
-
-  if (match && mesDetectado) {
-    let diaInicio = match[1].padStart(2, '0');
-    let diaFin = match[2].padStart(2, '0');
-
-    let fechaDesde = `${year}${mesDetectado}${diaInicio}`;
-    // ⚠️ fechaHasta es día de salida -1
-    let fechaHasta = `${year}${mesDetectado}${(parseInt(diaFin) - 1).toString().padStart(2, '0')}`;
-
-    return { fechaDesde, fechaHasta };
-  }
-
-  return null; // si no se detectó nada
-}
-
-// ------------------
-// 📲 Webhook WhatsApp
-// ------------------
-router.post('/webhook', async (req, res) => {
+// Webhook de WhatsApp
+router.post("/webhook", async (req, res) => {
   const incomingMsg = req.body.Body || "";
   const from = req.body.From;
 
-  console.log(`📩 Mensaje recibido: ${incomingMsg} de ${from}`);
+  console.log("📩 Mensaje recibido:", incomingMsg);
 
-  // Intentar parsear fechas
+  // 1. Parseamos fechas y personas
   const fechas = parseFechasDesdeTexto(incomingMsg);
+  const cantidadPersonas = parseCantidadPersonas(incomingMsg) || 2;
 
-  let fechaDesde = "20251007"; // fallback
-  let fechaHasta = "20251009"; // fallback
-  let personas = 2; // por ahora fijo, después lo parseamos también
-
-  if (fechas) {
-    fechaDesde = fechas.fechaDesde;
-    fechaHasta = fechas.fechaHasta;
-  } else {
-    console.log("⚠️ No se pudieron detectar fechas en el mensaje.");
+  if (!fechas) {
+    await client.messages.create({
+      from: "whatsapp:+14155238886",
+      to: from,
+      body: "📅 Para ayudarte necesito que me indiques las fechas. Ejemplo: 'del 7 al 10 de octubre para 2 personas'."
+    });
+    return res.sendStatus(200);
   }
 
-  // 1. Avisar que está procesando
+  const { fechaDesde, fechaHasta, fechaTextoDesde, fechaTextoHasta } = fechas;
+
+  // 2. Aviso de espera
   await client.messages.create({
-    from: TWILIO_FROM,
+    from: "whatsapp:+14155238886",
     to: from,
-    body: "👌 Estoy verificando disponibilidad en El Espinillo... dame unos segundos."
+    body: `👌 Estoy verificando disponibilidad en El Espinillo del ${fechaTextoDesde} (check-in) al ${fechaTextoHasta} (check-out) para ${cantidadPersonas} persona(s)...`
   });
 
   try {
-    // 2. Consulta al endpoint
+    // 3. Consulta al endpoint
     const response = await axios.post(
-      process.env.CREADORES_API_URL,
+      "https://www.creadoresdesoft.com.ar/cha-man/v4/INFODisponibilidadPropietarios.php?slug=...",
       {
         fechaDesde,
-        fechaHasta,
+        fechaHasta, // ojo: ya viene con -1 día en el parser
         nro_ota: "3",
-        personas,
+        personas: cantidadPersonas,
         latitude: "",
         longitude: "",
         ip: ""
@@ -109,41 +56,41 @@ router.post('/webhook', async (req, res) => {
     );
 
     const data = response.data;
+    console.log("📡 Respuesta API:", JSON.stringify(data, null, 2));
 
+    // 4. Procesamos respuesta
     if (data.resultado === "Aceptar" && data.datos.length > 0) {
-      let mensaje = "📋 Disponibilidad encontrada:\n\n";
+      let mensaje = `🏡 Disponibilidad en El Espinillo del ${fechaTextoDesde} (check-in) al ${fechaTextoHasta} (check-out):\n\n`;
 
-      data.datos.forEach(hab => {
-        mensaje += `🔹 ${hab.nombre} - Stock: ${hab.stock}\n`;
+      data.datos.forEach((hab) => {
+        mensaje += `🔹 ${hab.nombre} - Stock: ${hab.stock_disponible}\n`;
         if (hab.tarifas && hab.tarifas.length > 0) {
           const tarifa = hab.tarifas[0];
-          mensaje += `💲 Tarifa: ${tarifa.total} (${tarifa.cantidad_dias} noches)\n\n`;
+          mensaje += `💲 Tarifa: $${tarifa.total} (${tarifa.cantidad_dias} noches)\n\n`;
         }
       });
 
-      // 3. Enviar disponibilidad
       await client.messages.create({
-        from: TWILIO_FROM,
+        from: "whatsapp:+14155238886",
         to: from,
         body: mensaje
       });
     } else {
       await client.messages.create({
-        from: TWILIO_FROM,
+        from: "whatsapp:+14155238886",
         to: from,
-        body: "😔 No encontré disponibilidad para esas fechas."
+        body: `😔 No encontré disponibilidad del ${fechaTextoDesde} al ${fechaTextoHasta}. ¿Querés que te sugiera otras fechas o que busque en el resto del complejo Termal?`
       });
     }
   } catch (err) {
-    console.error("❌ Error consultando API:", err.message);
+    console.error("❌ Error al consultar API:", err.message);
     await client.messages.create({
-      from: TWILIO_FROM,
+      from: "whatsapp:+14155238886",
       to: from,
       body: "⚠️ Hubo un error al consultar disponibilidad, por favor intentá de nuevo."
     });
   }
 
-  // Twilio espera un 200 OK
   res.sendStatus(200);
 });
 
